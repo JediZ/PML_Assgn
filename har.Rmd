@@ -1,0 +1,118 @@
+Machine learning: How well do you lift your barbell?
+========================================================
+
+### Introduction
+In this project, my goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the [website
+here](http://groupware.les.inf.puc-rio.br/har). The data for this project come from [this source](http://groupware.les.inf.puc-rio.br/har).
+
+```{r eval=FALSE}
+setwd("F:/mygits/PML_Assgn")
+library(caret);library(kernlab)
+
+# download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv","pml-training.csv")
+# download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv","pml-testing.csv")
+toTrain <- read.csv("pml-training.csv")
+toTest <- read.csv("pml-testing.csv")
+```
+### Cleaning up data
+
+I choose to model the motion with a set of 6 variables, 2 each for arm, belt, and dumbell, respectively: roll_arm,pitch_arm,roll_belt,pitch_belt,roll_dumbbell,pitch_dumbbell. So I subset both sets so that only these columns are left.
+```{r eval=FALSE}
+vars <- c("roll_arm","pitch_arm","roll_belt","pitch_belt","roll_dumbbell","pitch_dumbbell")
+keep <- c(vars,"problem_id")
+toTest <- toTest[,keep]
+
+keep <- c(vars,"classe")
+toTrain <- toTrain[,keep]
+## now both sets are cleaned up.
+save(toTest,file="pmltest.RData")
+save(toTrain,file="pmltrain.RData")
+```
+### Partitioning the data
+Now I subset the original training set (toTrain) into training set (training) and a local testing set (testing) and a validation set (validation). 
+
+```{r}
+setwd("F:/mygits/PML_Assgn");library(caret);library(kernlab)
+load("pmltest.RData");load("pmltrain.RData")
+set.seed(54321)
+
+inBuild <- createDataPartition(toTrain$classe, p = 0.7, list=FALSE)
+validation <- toTrain[-inBuild,];buildData <- toTrain[inBuild,]
+inTrain <- createDataPartition(buildData$classe, p = 0.7, list=FALSE)
+testing <- buildData[-inTrain,];training <- buildData[inTrain,]
+rm(toTrain);rm(buildData);rm(inBuild);rm(inTrain)
+```
+
+
+
+### Machine Learning
+Next I first build two models (gbm and rf), and then combine them together as final model.In the rf method I will use 3-fold cross validation.
+
+```{r eval=FALSE}
+set.seed(12345)
+
+mod1 <- train(classe~., method="gbm",data=training,verbose=FALSE,
+              trControl=trainControl(method="repeatedcv",number=5,repeats=1))
+save(mod1,file="mod1.RData")
+mod2 <- train(classe~., method="rf", data=training,
+              trControl=trainControl(method="cv",number=3))
+save(mod2,file="mod2.RData")
+```
+```{r}
+load("mod1.RData");load("mod2.RData")
+pred1 <- predict(mod1,testing)
+pred2 <- predict(mod2,testing)
+
+predDF <-data.frame(pred1,pred2,classe=testing$classe)
+combModFit <- train(classe~., method="rf",data=predDF)
+combPred <- predict(combModFit,predDF)
+```
+Then I calculate the accuracies of the models:
+```{r}
+cm1<-confusionMatrix(pred1,testing$classe)
+cm2<-confusionMatrix(pred2,testing$classe)
+cmx <-confusionMatrix(combPred,testing$classe)
+accuracy1 <- cm1$overall[1]
+accuracy2 <- cm2$overall[1]
+accuracyX <- cmx$overall[1]
+```
+The accuracies for gbm model is `r accuracy1`, for rf model is `r accuracy2`, and for mixed model is `r accuracyX`. The confusion matrix for the mixed model is:
+```{r}
+cmx
+```
+Next I predict on the validation dataset
+```{r}
+pred1v <- predict(mod1,validation)
+pred2v <- predict(mod2,validation)
+predvDF <- data.frame(pred1=pred1v,pred2=pred2v)
+combPredv <- predict(combModFit,predvDF)
+```
+Now I evaluate on the validation
+```{r}
+cm1v<-confusionMatrix(pred1v,validation$classe)
+cm2v<-confusionMatrix(pred2v,validation$classe)
+cmxv <-confusionMatrix(combPredv,validation$classe)
+accuracy1v <- cm1v$overall[1]
+accuracy2v <- cm2v$overall[1]
+accuracyXv <- cmxv$overall[1]
+```
+On the validation set, the accuracies for gbm model is `r accuracy1v`, for rf model is `r accuracy2v`, and for mixed model is `r accuracyXv`. The confusion matrix for the mixed model is:
+```{r}
+cmxv
+```
+Based on this result using just six variables, I expect about 10% error rate for the testing, which is a little bit higher than the 9% error rate during the training.
+Finally I make predictions on the real testing sets (toTest)
+```{r}
+pred1v <- predict(mod1,toTest[,1:6])
+pred2v <- predict(mod2,toTest[,1:6])
+predvDF <- data.frame(pred1=pred1v,pred2=pred2v)
+combPredv <- predict(combModFit,predvDF)
+result <- data.frame(problem_id = toTest$problem_id,
+                     prediction = combPredv)
+result
+```
+
+```{r fig.width=7, fig.height=6}
+
+```
+
